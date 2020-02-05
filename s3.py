@@ -5,26 +5,43 @@ Offers
 """
 
 import boto3
+import glob
+import utils
 
 
-def contents(bucket_name, verbose=False):
-    """List contents of an S3 bucket."""
+def contents(bucket_name, key_pattern=None):
+    """List contents of S3 bucket."""
     s3 = boto3.resource('s3')
-    print('Contents of {}'.format(bucket_name))
-    for obj in s3.Bucket(bucket_name).objects.all():
-        print('{date:<32}\t{size:<14}\t{name}'.format(
+
+    def output(obj):
+        print('{date:<32}{size:<14}{name}'.format(
             date=obj.last_modified.strftime('%Y-%m-%d %H:%M:%S %p %Z'),
             size=obj.size,
             name=obj.key)
         )
+    print('Contents of S3 <{}>'.format(bucket_name))
+    for obj in s3.Bucket(bucket_name).objects.all():
+        if key_pattern is None:
+            output(obj)
+            continue
+        if utils.s3_unix_match(obj.key, key_pattern):
+            output(obj)
 
 
-def upload(bucket_name, src_path, s3_path, **kargs):
-    """Upload file to S3 bucket."""
+def upload(bucket_name, src_pattern, debug=False, **kargs):
+    """Upload file(s) to S3 bucket."""
+    if debug is True:
+        print('## DEBUG MODE ON')
+        print(f'Uploading <{src_pattern}> to S3 <{bucket_name}>')
+        for item in glob.iglob(src_pattern):
+            print(f'{item} => {bucket_name}/{item}')
+        return
     s3 = boto3.resource('s3')
-    s3.Object(bucket_name, s3_path).upload_file(
-        Filename=src_path,
-    )
+    s3_bucket = s3.Bucket(bucket_name)
+    print(f'Uploading <{src_pattern}> to S3 <{bucket_name}>')
+    for item in glob.iglob(src_pattern):
+        s3_bucket.upload_file(Filename=item, Key=item)
+        print(f'{item} => {bucket_name}/{item}')
 
 
 def download(bucket_name, s3_path, dest_path, **kargs):
@@ -35,8 +52,26 @@ def download(bucket_name, s3_path, dest_path, **kargs):
     )
 
 
-def delete(bucket_name, s3_path):
+def delete(bucket_name, del_pattern, debug=False):
     """Delete file from S3 bucket."""
     s3 = boto3.resource('s3')
-    response = s3.Object(bucket_name, s3_path).delete()
-    return response['ResponseMetadata']['HTTPStatusCode']
+    s3_bucket = s3.Bucket(bucket_name)
+    if debug is True:
+        print('## DEBUG MODE ON')
+        print(f'Deleting <{del_pattern}> from S3 <{bucket_name}>')
+        for obj in s3_bucket.objects.all():
+            if utils.s3_unix_match(obj.key, del_pattern):
+                print(f'{bucket_name}/{obj.key}')
+        return
+    print(f'Deleting <{del_pattern}> from S3 <{bucket_name}>')
+    for obj in s3_bucket.objects.all():
+        if utils.s3_unix_match(obj.key, del_pattern):
+            response = s3_bucket.Object(obj.key).delete()
+            https_code = response['ResponseMetadata']['HTTPStatusCode']
+            print(f'{bucket_name}/{obj.key} | response: {https_code}')
+
+
+# Testing
+# upload('mramirez-dev', '*.py')
+# delete('mramirez-dev', '*.py')
+contents('mramirez-dev', '*.txt')
