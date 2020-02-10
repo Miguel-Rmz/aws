@@ -45,7 +45,7 @@ import fnmatch
 import os
 
 
-def s3_unix_match(keyname, pattern, matchcase=True):
+def unix_match(keyname, pattern, matchcase=True):
     """UNIX filename matching for S3 keys.
 
     Parameters
@@ -62,9 +62,9 @@ def s3_unix_match(keyname, pattern, matchcase=True):
 
     Examples
     --------
-    >>> s3_unix_match('Testing/', 'Testing')
+    >>> unix_match('Testing/', 'Testing')
     True
-    >>> s3_unix_match('s3.py', '*.py')
+    >>> unix_match('s3.py', '*.py')
     True
     """
     if matchcase is False:
@@ -72,22 +72,52 @@ def s3_unix_match(keyname, pattern, matchcase=True):
     return fnmatch.fnmatchcase(keyname.rstrip('/').split('/')[-1], pattern)
 
 
-def objsummary_pprint(objsummary):
+def is_target_directory(key, prefix_filter='', delimiter='/'):
+    """Identifies if the S3 key is part of the target location."""
+    if delimiter in key.lstrip(prefix_filter).lstrip(delimiter):
+        return False
+    return True
+
+
+def pprint_objectsummary(objsummary):
     """Pretty prints an ObjectSummary's attributes."""
     obj_date = objsummary.last_modified.strftime('%Y-%m-%d %H:%M:%S %p %Z')
     print(f'{obj_date:<32} | {objsummary.size:>16} B | {objsummary.key}')
 
 
-def contents(bucket_name, key_pattern=None):
-    """List contents of S3 bucket."""
+def get_all_bucket_items(bucket_name):
+    """Yields ALL ObjectSummary resources from S3 Bucket."""
     s3 = boto3.resource('s3')
-    print(f'Contents of S3 [{bucket_name}]\n')
     for obj in s3.Bucket(bucket_name).objects.all():
-        if key_pattern is None:
-            objsummary_pprint(obj)
+        yield obj
+
+
+def get_filtered_bucket_items(bucket_name, prefix_filter):
+    """Yields FILTER ObjectSummary resources from S3 Bucket."""
+    s3 = boto3.resource('s3')
+    for obj in s3.Bucket(bucket_name).objects.filter(Prefix=prefix_filter):
+        yield obj
+
+
+def contents(bucket_name, prefix_filter='', key_pattern=None, recurse=False):
+    """List contents of S3 bucket."""
+    print(f'Contents of S3 [{bucket_name}]\n')
+    for obj in get_filtered_bucket_items(bucket_name, prefix_filter):
+        # enabling recursion requires target directory check
+        if recurse is False:
+            if is_target_directory(obj.key, prefix_filter):
+                if key_pattern is None:
+                    pprint_objectsummary(obj)
+                    continue
+                if unix_match(obj.key, key_pattern):
+                    pprint_objectsummary(obj)
+                    continue
             continue
-        if s3_unix_match(obj.key, key_pattern):
-            objsummary_pprint(obj)
+        if key_pattern is None:
+            pprint_objectsummary(obj)
+            continue
+        if unix_match(obj.key, key_pattern):
+            pprint_objectsummary(obj)
 
 
 def upload(bucket_name, src_pattern, debug=False, **kargs):
@@ -123,7 +153,7 @@ def delete(bucket_name, del_pattern, debug=False):
         print(f'{"-"*30}\n*---/ DEBUG MODE ON\n{"-"*30}')
     print(f'Deleting [{del_pattern}] from S3 [{bucket_name}]\n')
     for obj in s3_bucket.objects.all():
-        if s3_unix_match(obj.key, del_pattern):
+        if unix_match(obj.key, del_pattern):
             https_code = '204'
             if debug is False:
                 response = s3_bucket.Object(obj.key).delete()
@@ -132,6 +162,6 @@ def delete(bucket_name, del_pattern, debug=False):
 
 
 # Testing
-upload('mramirez-dev', '/home/mike/Desktop/Tutorial/*.txt')
+# upload('mramirez-dev', '/home/mike/Desktop/Tutorial/*.txt')
 # delete('mramirez-dev', '*.txt')
-# contents('mramirez-dev', '*.txt')
+contents('mramirez-dev', 'Test/Test/', '*.txt')
